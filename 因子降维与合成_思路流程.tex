@@ -1,0 +1,368 @@
+\documentclass[11pt]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{ctex}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\providecommand{\cmrsideswitch}{}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue,urlcolor=blue]{hyperref}
+\renewcommand{\arraystretch}{1.25}
+\setlength{\parskip}{0.4em}
+\title{东方证券 alpha 优化 · 因子模块思路流程}
+\author{常笑涵}
+\date{Semester 2, 2026}
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+\begin{quote}
+\textbf{模块定位}：本文只覆盖\textbf{信号线}（文档 \S3--\S5 的「因子构造 \ensuremath{\rightarrow} 单因子检验 \ensuremath{\rightarrow} 因子筛选与多因子合成」），\textbf{不涉及}风险线（\S6.4 优化器）与评价层（\S8）。
+
+\textbf{用途}：把"聊出来的方法"固化成可写代码的流程，\textbf{前提 / 约束 / 缺陷逐条标清}。
+
+\textbf{生成日期}：2026-10-01
+
+\textbf{标注规则}：🟢【课内】= ETX5460 / MTH5510 / MTH3260 / MTH3251 讲义讲过；🟡【半课内】= 课程提过但没展开、中间推理由 AI 补全；🔴【发散】= 课程外，AI 另外加的。
+\end{quote}
+\subsection{\texorpdfstring{零、一句话流程}{零、一句话流程}}
+\begin{quote}
+\textbf{(1) IC 相关性聚类把 $J$ 个因子精简成 $G$ 个因子块 \ensuremath{\rightarrow} (2) GLS 给块定权重 \ensuremath{\rightarrow} (3) 贝叶斯收缩压掉极端/负权重 \ensuremath{\rightarrow} (4) HAC + 联合检验验证显著性 \ensuremath{\rightarrow} (5) 明确标注"假阳性堆积"这一未处理的缺陷。}
+\end{quote}
+\subsection{\texorpdfstring{一、总览图}{一、总览图}}
+\begin{verbatim}
+候选因子池（J 个，方向统一/去极值/标准化/中性化）
+        │
+        │  Stage 1  降维
+        │  IC 相关矩阵 (J×J) → Ward 层次聚类 → 树
+        │  → 沿树扫块数 G → BIC 定 G* → F 检验确证
+        ▼
+   G* 个「因子块」（块内等权聚合 → G* 个块暴露）
+        │
+        │  Stage 2  合成（定权重）
+        │  w ∝ Σ_IC⁻¹ · μ_IC        ← 对"因子"做 Markowitz
+        ▼
+   合成 score（G* 维权重的线性组合）
+        │
+        │  Stage 3  收缩（治 Stage 2 的极端/负权重）
+        │  高斯先验 → ridge：ŵ = (Z'Z + λI)⁻¹Z'y，λ = σ²/τ²
+        ▼
+   稳健的合成 score
+        │
+        │  Stage 4  检验（显著性）
+        │  IC 序列 HAC t 检验 + 多因子 GRS / Pesaran-Yamagata Jα
+        ▼
+   入库 score（送优化器）
+        │
+        │  Stage 5  缺陷标注
+        │  假阳性堆积 → 记为已知局限（代码注释 + README），v2 再做
+        ▼
+\end{verbatim}
+\subsection{\texorpdfstring{二、逐步详解}{二、逐步详解}}
+\subsubsection{\texorpdfstring{Stage 1 \textperiodcentered{} 因子降维（聚类 + F 检验 + BIC）}{Stage 1 · 因子降维（聚类 + F 检验 + BIC）}}
+\textbf{目的}：把 $J$ 个候选因子压成 $G$ 个\textbf{因子块}，块内等权聚合，解决"因子太多导致拟合/共线"。
+\textbf{方法（四步）}
+\begin{enumerate}
+  \item \textbf{算 IC 相关矩阵}（$J\times J$，不是 $N\times N$）：每个因子一条 IC 时间序列，算两两相关（备选：用\textbf{暴露相关}做对照）。
+  \item \textbf{Ward 层次聚类} \ensuremath{\rightarrow} 得一棵树（dendrogram）。
+  \item \textbf{沿树扫块数} $G=J\to1$，对每个 $G$ 算 \textbf{BIC}：
+\end{enumerate}
+\[
+BIC = n\ln(RSS/n) + k\ln n,\qquad k = G\ \text{（块数）}
+\]
+取 \textbf{BIC 最小}的 $G^{*}$。\textbf{（一维扫描，没有"挑"的动作）}
+\begin{enumerate}
+  \item \textbf{F 检验确证}：沿树相邻层级\textbf{天然嵌套}，逐级做约束检验：
+\end{enumerate}
+\[
+F=\frac{(RSS_r-RSS_u)/q}{RSS_u/(n-k)}\sim F(q,\,n-k)
+\]
+停在一个"仍不能拒绝"的层级，作为最终分组。
+\textbf{【前提】}
+\begin{itemize}
+  \item 因子暴露\textbf{已}完成方向统一 / 去极值 / 标准化 / 中性化（Stage 0 的输入要求）；
+  \item 相关性估计需\textbf{足够样本}（日频 \ensuremath{\ge} 数年，\textasciitilde{}2000 天以上）；
+  \item 分组结果\textbf{要有经济可解释性}（能说清"这块是什么经济含义"）；
+  \item 用 IC 相关时，IC 序列长度 = 样本天数，需 $T$ 足够大。
+\end{itemize}
+\textbf{【约束】}
+\begin{itemize}
+  \item \textbf{只做一次确证性 F 检验}，禁止"试到通过"（否则即数据窥探，见 Stage 5）；
+  \item \textbf{冻结 OOS 不得用于选 $G$}（会污染）\ensuremath{\rightarrow} 用 BIC 一维扫描代替；
+  \item 相关性矩阵\textbf{要在训练窗口内估计}，不得含验证/OOS 期。
+\end{itemize}
+\textbf{【缺陷】}
+\begin{itemize}
+  \item 聚类是\textbf{数据驱动}的 \ensuremath{\rightarrow} 分组选择仍带\textbf{窥探风险}（Stage 5 已记）；
+  \item \textbf{$G$ 本身是自由度}，BIC 只是缓解不是根治；
+  \item 相关性\textbf{时变}（牛熊不同）\ensuremath{\rightarrow} 需滚动窗口检查稳定性，全样本矩阵可能失真；
+  \item 若因子数 $J$ 极大（数百），$J\times J$ 相关矩阵的\textbf{估计误差}会累积。
+\end{itemize}
+\textbf{标注}：
+\begin{itemize}
+  \item F 检验 / 嵌套约束检验 🟢 ETX5460 \textbf{W9} + \textbf{Project2 Q3}（HAR \ensuremath{\subset} AR(10)）
+  \item HAR 式"分组共享参数"的思路 🟢 \textbf{W7 \S5.1}
+  \item Ward 层次聚类 🔴 发散（机器学习）
+  \item BIC 一维扫描 🟡 半课内（课程未深讲信息准则）
+  \item PCA 分组（备选） 🟡 MTH5510 \textbf{W5} 降维延伸
+\end{itemize}
+\textbf{代码对应}：需新写（\texttt{hclust} + BIC 扫描 + \texttt{lm} 的 F 检验）。
+\subsubsection{\texorpdfstring{Stage 2 \textperiodcentered{} 因子合成（GLS 给权重）}{Stage 2 · 因子合成（GLS 给权重）}}
+\textbf{目的}：给 $G^{*}$ 个因子块定合成权重，\textbf{自动降低同源块的重复加权}。
+\textbf{方法}：把"因子块当资产、IC 当预期收益"，做 Markowitz：
+\[
+w^{*} \propto \Sigma_{IC}^{-1}\,\mu_{IC}
+\]
+其中 $\mu_{IC}$ = 各块 IC 均值向量，$\Sigma_{IC}$ = 块 IC 的协方差矩阵。
+\textbf{【前提】}
+\begin{itemize}
+  \item $\Sigma_{IC}$ \textbf{可逆}（Stage 1 降维后 $G^{*}$ 很小，一般可逆）；
+  \item 各块\textbf{方向和尺度已统一}；
+  \item $\Sigma_{IC},\mu_{IC}$ \textbf{只用训练窗口}估计。
+\end{itemize}
+\textbf{【约束】}
+\begin{itemize}
+  \item 权重\textbf{只在训练窗口估}，不得看验证/OOS；
+  \item 需记录\textbf{因子块版本 / 权重 / 训练窗口}（文档 \S5 要求）。
+\end{itemize}
+\textbf{【缺陷】}
+\begin{itemize}
+  \item \textbf{会给负权重 / 极端权重}（两因子 IC 相近且高相关时，其一被赋负权）\ensuremath{\rightarrow} \textbf{不可解释、不稳定} \ensuremath{\rightarrow} \textbf{必须接 Stage 3}；
+  \item $\Sigma_{IC}$ 用样本估计，$G$ 稍大时\textbf{病态}；
+  \item 这是\textbf{加权}，\textbf{不是减因子}（要减量靠 Stage 1）。
+\end{itemize}
+\textbf{标注}：
+\begin{itemize}
+  \item 切点组合公式 $w\propto\Sigma^{-1}\mu$ 🟢 Assignment1 \textbf{Q1(a)}
+  \item GMM 有效权重思想 🟢 ETX5460 \textbf{W9}
+  \item "因子当资产"的迁移 🟡 半课内（由 AI 连接）
+\end{itemize}
+\textbf{代码对应}：复用 \texttt{Assignment1\_asset\_pricing.Rmd} Q1(a) 的切点组合段。
+\subsubsection{\texorpdfstring{Stage 3 \textperiodcentered{} 贝叶斯收缩（治 Stage 2 的极端权重）}{Stage 3 · 贝叶斯收缩（治 Stage 2 的极端权重）}}
+\textbf{目的}：把 Stage 2 的负权重/极端权重\textbf{朝 0 收缩}，防过拟合。
+\textbf{方法}：给权重配高斯先验 $w\sim N(0,\tau^2 I)$，后验均值即 ridge：
+\[
+\hat w = \Big(Z'Z + \underbrace{\tfrac{\sigma^2}{\tau^2}}_{\lambda}I\Big)^{-1}Z'y
+\]
+每维被乘 $d_j^2/(d_j^2+\lambda)$ 朝 0 缩。
+\textbf{【前提】}
+\begin{itemize}
+  \item \textbf{先验的选择}（\textbf{已定：高斯 \ensuremath{\rightarrow} ridge}）：高斯 \ensuremath{\rightarrow} ridge（只压小）；拉普拉斯 \ensuremath{\rightarrow} LASSO（压成恰好 0 = 自动选因子）；$t$/horseshoe \ensuremath{\rightarrow} 重尾（大信号少缩）；
+  \item $\lambda$ 需定（交叉验证 或 经验贝叶斯）。
+\end{itemize}
+\textbf{【约束】}
+\begin{itemize}
+  \item 若用经验贝叶斯估 $\tau^2$（边际似然最大化）\ensuremath{\rightarrow} \textbf{也只能用训练窗口}；
+  \item \textbf{必须做先验敏感性分析}（换 2--3 个先验看结论稳不稳）。
+\end{itemize}
+\textbf{【缺陷】}
+\begin{itemize}
+  \item \textbf{先验主观}（原罪）\ensuremath{\rightarrow} 用经验贝叶斯 / 分层先验缓解；
+  \item 收缩引入\textbf{偏差}（换方差）\ensuremath{\rightarrow} 若信号本就很强，收缩可能\textbf{反而变差}；
+  \item $\lambda$ 的确定是又一个自由度。
+\end{itemize}
+\textbf{标注}：
+\begin{itemize}
+  \item 贝叶斯框架（先验/似然/后验） 🟢 MTH3260 s9--s10
+  \item \textbf{后验均值 = ridge 的推导} 🟡 半课内（AI 补全，课程未连这一步）
+  \item 高斯共轭 / 后验精度相加 🟡 同上
+  \item 经验贝叶斯 / evidence max / horseshoe 🔴 发散
+\end{itemize}
+\textbf{代码对应}：\texttt{glmnet}（ridge/LASSO）或手写 $(Z'Z+\lambda I)^{-1}Z'y$。
+\subsubsection{\texorpdfstring{Stage 4 \textperiodcentered{} 显著性检验（HAC + 联合检验）}{Stage 4 · 显著性检验（HAC + 联合检验）}}
+\textbf{目的}：证明合成 score \textbf{统计显著}，不是样本波动。
+\textbf{方法}
+\begin{enumerate}
+  \item \textbf{HAC / Newey--West t 检验}（IC 序列有自相关，普通标准误低估）：
+\end{enumerate}
+\[
+\widehat{\mathrm{Var}}(\overline{IC})=\frac{1}{T}\Big(\hat\gamma_0+2\sum_{l=1}^{L}\big(1-\tfrac{l}{L+1}\big)\hat\gamma_l\Big),\qquad t=\overline{IC}\big/\sqrt{\widehat{\mathrm{Var}}}
+\]
+\begin{enumerate}
+  \item \textbf{联合检验}（多块一起看）：
+\end{enumerate}
+\begin{itemize}
+  \item \textbf{GRS}：$GRS=\frac{T-N-K}{N}(1+\bar f'\hat\Omega^{-1}\bar f)^{-1}\hat\alpha'\hat\Sigma_e^{-1}\hat\alpha\sim F(N,T-N-K)$
+  \item \textbf{Pesaran--Yamagata $J_\alpha$}：适合大 $N$，免求 $\hat\Sigma_e^{-1}$
+\end{itemize}
+\textbf{【前提】}
+\begin{itemize}
+  \item IC 序列\textbf{足够长}（$T$ 大，HAC 才稳）；
+  \item GRS 要求 $T>N+K$（否则 $\hat\Sigma_e$ 不可逆）；
+  \item HAC 带宽 $L$（如 $L=3$，与 Assignment1 一致）。
+\end{itemize}
+\textbf{【约束】}
+\begin{itemize}
+  \item HAC 改的是\textbf{推断（标准误）}，\textbf{不改点估计} \ensuremath{\rightarrow} 与风险线的 WLS \textbf{互补不冲突}；
+  \item GRS 若 $N$ 太大 \ensuremath{\rightarrow} 先用\textbf{分组组合降维}（同 Assignment1 Q1(b)）。
+\end{itemize}
+\textbf{【缺陷】}
+\begin{itemize}
+  \item \textbf{HAC 对带宽 $L$ 敏感}；
+  \item GRS 在 $N$ 大时不可行；
+  \item \textbf{未做多重检验修正 \ensuremath{\rightarrow} 假阳性堆积}（见 Stage 5）。
+\end{itemize}
+\textbf{标注}：
+\begin{itemize}
+  \item HAC / Newey-West 🟢 ETX5460 \textbf{W9} + Assignment1 \textbf{Q1(b)}
+  \item GRS 🟢 Assignment1 \textbf{Q1(c)(i)}
+  \item Pesaran--Yamagata $J_\alpha$ 🟢 Assignment1 \textbf{Q1(c)(ii)}
+\end{itemize}
+\textbf{代码对应}：复用 Assignment1 Q1(b) 的 \texttt{NeweyWest} 段 + Q1(c) 的 GRS/PY-J 段。
+\subsubsection{\texorpdfstring{Stage 5 \textperiodcentered{} 缺陷标注（假阳性堆积）}{Stage 5 · 缺陷标注（假阳性堆积）}}
+\textbf{问题}：$M$ 次独立检验、全为噪声时，$P(\text{至少一个假阳性})=1-(1-\alpha)^M$：
+\begin{itemize}
+  \item $M=20,\alpha=0.05$ \ensuremath{\rightarrow} \textbf{64\%}；$M=100$ \ensuremath{\rightarrow} \textbf{99.4\%}。
+\end{itemize}
+\textbf{处理}：\textbf{本模块不实现修正}，\textbf{记为已知局限}，落两处：
+\begin{itemize}
+  \item \textbf{代码注释}（因子筛选入口）：
+\end{itemize}
+\begin{verbatim}
+  # KNOWN LIMITATION (data snooping / multiple testing):
+  # 本管线对 M 个候选因子逐个做显著性检验，未做多重检验修正
+  # (Bonferroni / BH-FDR / White's Reality Check)。
+  # 因此"显著"因子数量可能被高估——挖 100 个纯噪声因子，5% 水平预期仍有 5 个"显著"。
+  # 原因：本项目聚焦单点优化(横截面估计)，多重检验修正列为 v2 TODO。
+\end{verbatim}
+\begin{itemize}
+  \item \textbf{README} 的 *Known Limitations / Future Work* 一节。
+\end{itemize}
+\textbf{同时记入}：Stage 1 的"聚类选 $G$"、Stage 2.3 的"OOS 挑模型"\textbf{都是同一个病（selection bias）}，一并标注。
+\textbf{标注}：MTH3260 只讲\textbf{单次}检验（NP 引理 / Wald / GLRT / Wilks，🟢 s18--s21）；\textbf{多重检验修正整块 🔴 纯发散}。
+\subsection{\texorpdfstring{三、【前提 / 约束 / 缺陷】汇总表（写代码前必读）}{三、【前提 / 约束 / 缺陷】汇总表（写代码前必读）}}
+{\small
+\begin{longtable}{p{1.28cm}p{3.85cm}p{5.34cm}p{5.73cm}}
+\toprule
+阶段 & 【前提】 & 【约束】 & 【缺陷】 \\
+\midrule
+\textbf{1 降维} & 暴露已标准化；样本 \ensuremath{\ge} 数年；分组可解释 & 只做 1 次确证 F 检验；OOS 不用于选 $G$；只用训练窗口 & 数据驱动仍带窥探；$G$ 是自由度；相关性时变 \\
+\textbf{2 GLS} & $\Sigma_{IC}$ 可逆；方向和尺度统一 & 只用训练窗口；记录版本/窗口 & 出负权/极端权；$\Sigma_{IC}$ 病态；只加权不减量 \\
+\textbf{3 收缩} & 先验须选（Gauss/Laplace/t）；$\lambda$ 须定 & 经验贝叶斯只用训练窗口；做敏感性分析 & 先验主观；收缩引入偏差；$\lambda$ 是自由度 \\
+\textbf{4 检验} & IC 序列够长；GRS 需 $T>N+K$；定带宽 $L$ & HAC 只改推断；大 $N$ 先降维 & HAC 对 $L$ 敏感；GRS 大 $N$ 不可行；\textbf{未修正多重检验} \\
+\textbf{5 缺陷} & --- & 必须写进注释 + README & \textbf{假阳性堆积未处理} \\
+\bottomrule
+\end{longtable}
+}
+\textbf{三条贯穿全程的硬约束}：
+\begin{enumerate}
+  \item \textbf{所有估计只用训练窗口}，绝不碰验证/冻结 OOS；
+  \item \textbf{不做"试到通过"的搜索}（F 检验 / 选 $G$ / 选模型皆然）；
+  \item \textbf{每个方法都要报告它能给什么、不能给什么}（缺陷透明）。
+\end{enumerate}
+\subsection{\texorpdfstring{四、与东方证券文档的对应}{四、与东方证券文档的对应}}
+{\small
+\begin{longtable}{p{1.54cm}p{3.73cm}p{6.17cm}p{4.76cm}}
+\toprule
+本模块 Stage & 对应文档章节 & 文档原做法 & 我们的改动 \\
+\midrule
+Stage 1 & \S5 因子筛选与合成 & 无明确降维，靠"高相关不能重复加权"的\textbf{口头告诫} & 用聚类 + F 检验\textbf{定量兑现}该告诫 \\
+Stage 2 & \S5 合成 & 基于历史 IC/ICIR 加权 & 换成 $\Sigma_{IC}^{-1}\mu$（\textbf{GLS}，修正"忽略相关"） \\
+Stage 3 & \S5（未提） & 无 & 加贝叶斯收缩防极端权重 \\
+Stage 4 & \S4 单因子研究 & IC 均值 / ICIR / 正 IC 比例（\textbf{纯点估计}） & 加 \textbf{HAC t + 联合检验} \\
+Stage 5 & \S8.3（有 train/val/OOS 意识） & 未提多重检验 & 明确记为局限 \\
+\bottomrule
+\end{longtable}
+}
+\subsection{\texorpdfstring{五、未纳入本模块（另属风险线 / 评价层）}{五、未纳入本模块（另属风险线 / 评价层）}}
+{\small
+\begin{longtable}{p{3.53cm}p{1.98cm}p{10.69cm}}
+\toprule
+内容 & 归属 & 状态 \\
+\midrule
+横截面 WLS/GMM（优化点 B） & \textbf{风险线} \S6.4 & 主线，单独文档 \\
+ES/CVaR 替代方差惩罚（5.1） & \textbf{风险线} \S6.3 & 待展开 \\
+VaR/ES 回测、配对检验（6） & \textbf{评价层} \S8 & 待展开 \\
+组合级 GJR-GARCH（E3） & 风险线 \S6.4 & 待展开 \\
+\textbf{尾部依赖诊断（copula）} & 展示模块（非优化） & 讨论中（MTH5510 W8--9）；\textbf{澄清过 copula \ensuremath{\ne} 无视分布}------真正的"无视分布"工具是 GMM(W9)/QMLE(W8) \\
+非嵌套模型比较（Vuong / J-test） & 模型选择工具 & 🔴 发散；本模块分组天然嵌套，故暂不需要 \\
+\bottomrule
+\end{longtable}
+}
+\subsection{\texorpdfstring{六、已定决策（2026-10-01）}{六、已定决策（2026-10-01）}}
+{\small
+\begin{longtable}{p{1.25cm}p{2.36cm}p{4.06cm}p{8.52cm}}
+\toprule
+\# & 决策点 & 已定 & 说明 \\
+\midrule
+1 & Stage 1 用哪种相关 & \textbf{IC 相关}（暴露相关留作对照） & 直接对应"alpha 信息冗余" \\
+2 & 块内聚合方式 & \textbf{先等权} & 简单可解释；\textbf{标注为可优化项}（后续可换块内 GLS / 按 ICIR 加权） \\
+3 & Stage 3 先验 & \textbf{高斯 \ensuremath{\rightarrow} ridge} & 最稳；不选拉普拉斯（LASSO，更激进） \\
+4 & 交付格式 & \textbf{出 PDF} & 按用户要求，审核文件也一律 PDF \\
+\bottomrule
+\end{longtable}
+}
+\subsection{\texorpdfstring{七、补充说明（前几轮讨论中"被渲染吞掉"、未落入前文的部分）}{七、补充说明（前几轮讨论中"被渲染吞掉"、未落入前文的部分）}}
+\begin{quote}
+本节把此前对话里已回答、但用户端未显示的内容补齐，\textbf{逐条标注}。
+\end{quote}
+\subsubsection{\texorpdfstring{7.1 为什么是 $J\times J$，不是 $N\times N$ 🟢}{7.1 为什么是 JtimesJ，不是 NtimesN 🟢}}
+{\small
+\begin{longtable}{p{3.28cm}p{1.27cm}p{6.37cm}p{5.28cm}}
+\toprule
+矩阵 & 维度 & 含义 & 可行性 \\
+\midrule
+\textbf{因子相关性矩阵} & $J\times J$ & $J$ = \textbf{因子个数}（几十\textasciitilde{}一两百） & \textbf{[已完成]} 计算无难度（\texttt{cov()}） \\
+股票相关性矩阵 & $N\times N$ & $N$ = \textbf{股票数}（几千） & ❌ 估不稳（那是风险模型的坑） \\
+\bottomrule
+\end{longtable}
+}
+\textbf{Stage 1 聚的是"因子"，所以是 $J\times J$。} 三个真问题不在计算，在统计：\textbf{样本量}（日频 \ensuremath{\ge} 数年）、\textbf{稳定性}（相关性时变，用滚动窗口）、\textbf{用哪种相关}（已定 IC 相关）。
+\subsubsection{\texorpdfstring{7.2 层次聚类为什么"天然嵌套"------F 检验为什么合法 🟢/🔴}{7.2 层次聚类为什么"天然嵌套"——F 检验为什么合法 🟢/🔴}}
+\begin{itemize}
+  \item 层次聚类切得越高 = 块越少 = 合并越多；
+  \item 故 $G=2$ 的分组 = 把 $G=3$ 的某两块\textbf{合并} \ensuremath{\rightarrow} \textbf{相邻层级天然嵌套} \ensuremath{\Longrightarrow} \textbf{逐级 F 检验完全合法}。
+  \item 于是流程 = \textbf{"带 F 检验的向后逐步合并"}：从 $G=J$ 起逐级合并，停在"最后一个仍不能拒绝的合并"。🔴 聚类发散，🟢 F 检验/嵌套约束在 W9 + Project2 Q3。
+  \item \textbf{配套的 BIC 一维扫描}（🟡 半课内）：沿树扫 $G$，取 $BIC$ 最小 \ensuremath{\rightarrow} \textbf{没有"挑"的动作}，比"多试几次"干净。$\Sigma$ 一维序列 = 不会踩 selection bias。
+\end{itemize}
+\subsubsection{\texorpdfstring{7.3 贝叶斯里"分布"到底怎么处理 🟡}{7.3 贝叶斯里"分布"到底怎么处理 🟡}}
+\textbf{先分清两个分布：}
+{\small
+\begin{longtable}{p{2.18cm}p{1.87cm}p{12.15cm}}
+\toprule
+分布 & 是什么 & 怎么对待 \\
+\midrule
+\textbf{先验 $p(w)$} & 主观信念 & \textbf{是"选择"，不是"确认"} \ensuremath{\rightarrow} 用\textbf{先验敏感性分析}（换 2--3 个先验看结论稳不稳） \\
+\textbf{似然 $p(y\mid w)$} & 数据生成假设 & 假设错了\textbf{有救}（见下） \\
+\bottomrule
+\end{longtable}
+}
+\textbf{不同先验 \ensuremath{\rightarrow} 不同方法}：高斯 \ensuremath{\rightarrow} ridge（压小）；拉普拉斯 \ensuremath{\rightarrow} LASSO（\textbf{压成恰好 0 = 自动选因子}）；$t$/horseshoe（🔴）\ensuremath{\rightarrow} 重尾，对强信号少缩。
+\textbf{"无视分布"的真正工具 ------ 不是 copula，是你笔记里的 GMM / QMLE：}
+{\small
+\begin{longtable}{p{1.28cm}p{4.61cm}p{10.31cm}}
+\toprule
+工具 & 出处 & 为什么"无视分布" \\
+\midrule
+\textbf{GMM} & 🟢 ETX5460 \textbf{W9} & 只用矩条件 $E[g(\theta)]=0$，\textbf{不假设任何分布} \\
+\textbf{QMLE} & 🟢 ETX5460 \textbf{W8} + Project2 Q4(b) & 分布假设\textbf{错了仍一致}（只损效率）；配 \textbf{Bollerslev--Wooldridge 稳健标准误} \\
+\bottomrule
+\end{longtable}
+}
+\textbf{copula 的澄清} 🟢/🟡：$F(x_1,\dots,x_n)=C(F_1(x_1),\dots,F_n(x_n))$ ------ copula 是\textbf{"分离边际与依赖"}：边际 $F_i$ 可任意（松绑），但 \textbf{copula $C$ 本身就是分布假设}（Gaussian/$t$/Gumbel...）。\textbf{所以 copula 不是"无视分布"，只是"边际灵活 + 依赖显式"。} 它对口的是\textbf{联合分布 / 尾部依赖}（MTH5510 W8--9），\textbf{不搭}贝叶斯先验。
+\subsubsection{\texorpdfstring{7.4 多重检验三方法（本模块不实现，但要记清）🔴 纯发散}{7.4 多重检验三方法（本模块不实现，但要记清）🔴 纯发散}}
+\textbf{问题}：$M$ 次独立检验、全为噪声时，$P(\text{至少一个假阳性})=1-(1-\alpha)^M$ ------ $M=20$ 时 \textbf{64\%}，$M=100$ 时 \textbf{99.4\%}。
+{\small
+\begin{longtable}{p{4.77cm}p{2.39cm}p{6.66cm}p{2.39cm}}
+\toprule
+方法 & 控制什么 & 做法 & 保守度 \\
+\midrule
+\textbf{Bonferroni} & FWER \ensuremath{\le} \ensuremath{\alpha} & 阈值改 $\alpha/M$ & 最严（union bound） \\
+\textbf{BH-FDR} & 假发现\textbf{比例} \ensuremath{\le} \ensuremath{\alpha} & 排 $p$ 值，找最大 $k$ 使 $p_{(k)}\le\frac{k}{M}\alpha$ & 中 \\
+\textbf{White's Reality Check / Hansen SPA} & 最优策略显著性 & \textbf{stationary bootstrap} 零分布（\textbf{含"取 max"动作}） & 对路 \\
+\bottomrule
+\end{longtable}
+}
+\textbf{易混}：FDR \ensuremath{\ne} FWER；Bonferroni \textbf{忽略相关性}（你的因子高度相关 \ensuremath{\rightarrow} 过保守）\ensuremath{\rightarrow} \textbf{Reality Check 更优}（bootstrap 吃进相关性）。
+\textbf{本模块处理}：\textbf{不实现}，只记 Stage 5 的局限。
+\begin{quote}
+\textbf{文档信息}
+
+- 路径：\texttt{Desktop\textbackslash{}就业\textbackslash{}东方证券alpha优化\textbackslash{}因子降维与合成\_思路流程.md}
+
+- 状态：\textbf{v1（2026-10-01）}，已含 第六节 决策 + 第七节 补充说明
+
+- 关联：\texttt{就业\textbackslash{}SIMPLE\_ALPHA\_STRATEGY\_OVERVIEW Copy.pdf}（面试材料）+ \texttt{\_dfzq\_alpha.txt}（提取文本）
+\end{quote}
+\end{document}

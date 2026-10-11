@@ -1,0 +1,185 @@
+\documentclass[11pt]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{ctex}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\providecommand{\cmrsideswitch}{}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue,urlcolor=blue]{hyperref}
+\renewcommand{\arraystretch}{1.25}
+\setlength{\parskip}{0.4em}
+\title{东方证券 alpha 优化 · 数据获取方案}
+\author{常笑涵}
+\date{Semester 2, 2026}
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+\begin{quote}
+\textbf{用途}：为两个模块（\textbf{因子线} = 信号线；\textbf{横截面 B} = 风险线）提供统一数据。
+
+\textbf{生成日期}：2026-10-02
+
+\textbf{依据}：2026-10-02 在本机实测 5 轮（脚本 \texttt{\_check\_datasource.py} / \texttt{\_check\_akshare.py} / \texttt{\_check\_gaps.py} / \texttt{\_check\_gaps2.py}）。
+
+\textbf{标注规则}：🟢【课内】；🟡【半课内】；🔴【发散】。
+\end{quote}
+\subsection{\texorpdfstring{零、一句话}{零、一句话}}
+\begin{quote}
+\textbf{本机网络只对部分数据源开放（新浪/腾讯/中证/巨潮通，东财快照/网易/baostock 挂）\ensuremath{\Longrightarrow} 管线按"能用的源"设计；历史市值/估值不靠外部源，用「日行情 \ensuremath{\times} 财务」自己重建。}
+\end{quote}
+\subsection{\texorpdfstring{一、实测结果（2026-10-02，本机）}{一、实测结果（2026-10-02，本机）}}
+{\small
+\begin{longtable}{p{12.29cm}p{3.91cm}}
+\toprule
+源 & 结果 \\
+\midrule
+通用网络（百度/GitHub/pypi） & \textbf{[已完成]} \\
+\textbf{新浪行情} \texttt{hq.sinajs.cn}、\texttt{stock\_zh\_a\_spot}、\texttt{stock\_zh\_a\_daily} & \textbf{[已完成]} \\
+\textbf{腾讯行情} \texttt{qt.gtimg.cn}、\texttt{web.ifzq.gtimg.cn} & \textbf{[已完成]} \\
+\textbf{东财} 历史日线 \texttt{stock\_zh\_a\_hist} & \textbf{[已完成]} \\
+\textbf{东财} 快照/行业板块/个股信息/指数日线 & ❌ RemoteDisconnected \\
+\textbf{中证指数} 沪深300 成分 + 权重 & \textbf{[已完成]} \\
+\textbf{巨潮} 个股行业变更 & \textbf{[已完成]} \\
+baostock（私有 socket） & ❌ WinError 10057 \\
+网易历史 & ❌ 502 \\
+\bottomrule
+\end{longtable}
+}
+\textbf{结论}：\textbf{HTTP 系可用源足够拼齐数据}；须避开东财的\textbf{快照/实时类}接口。
+\subsection{\texorpdfstring{二、数据源清单（主源 + Fallback）}{二、数据源清单（主源 + Fallback）}}
+{\small
+\begin{longtable}{p{1.20cm}p{2.80cm}p{6.70cm}p{1.20cm}p{4.30cm}}
+\toprule
+\# & 需要的数据 & 主源 / 接口 & 状态 & Fallback \\
+\midrule
+1 & \textbf{日行情}（OHLCV + 换手率） & 新浪 \texttt{stock\_zh\_a\_daily}（前复权） & \textbf{[已完成]} & 东财 \texttt{stock\_zh\_a\_hist} / 腾讯 \\
+2 & \textbf{全A名单} & 新浪 \texttt{stock\_zh\_a\_spot}（\textbf{5571 只}） & \textbf{[已完成]} & --- \\
+3 & \textbf{个股 \ensuremath{\rightarrow} 行业}（PIT） & 巨潮 \texttt{stock\_industry\_change\_cninfo}（\textbf{含变更日期}） & \textbf{[已完成]} & 中证行业 \\
+4 & \textbf{财务}（净利/净资产/每股） & 新浪 \texttt{stock\_financial\_abstract}（80 指标 \ensuremath{\times} 105 期） & \textbf{[已完成]} & 同花顺 \texttt{stock\_financial\_analysis\_indicator} \\
+5 & \textbf{沪深300 成分 + 权重} & 中证 \texttt{index\_stock\_cons\_csindex} / \texttt{index\_stock\_cons\_weight\_csindex} & \textbf{[已完成]} & --- \\
+6 & \textbf{历史市值 / 估值} & \textbf{计算}（见 \S{}三） & \textbf{[已完成]} 推导 & 百度 \texttt{stock\_zh\_valuation\_baidu}（仅近一年） \\
+\bottomrule
+\end{longtable}
+}
+\subsection{\texorpdfstring{三、核心设计：历史市值/估值用「计算」而非「找源」}{三、核心设计：历史市值/估值用「计算」而非「找源」}}
+$$\text{总市值}\_t=\text{收盘价}\_t\times\text{总股本}\_{t},\qquad
+PB\_t=\frac{\text{股价}\_t}{\text{每股净资产}\_{t}},\qquad
+PE\_t=\frac{\text{股价}\_t}{\text{每股收益}\_{t}}$$
+\begin{itemize}
+  \item \textbf{收盘价} \ensuremath{\leftarrow} 日行情（源 1）；
+  \item \textbf{总股本 / 每股净资产 / 每股收益} \ensuremath{\leftarrow} 财务摘要（源 4），\textbf{按报告期给出历史序列}；
+  \item \textbf{PIT 要点}：财务值必须按\textbf{披露日期}生效（不能用报告期当可用日），否则前视。
+\end{itemize}
+\begin{quote}
+\textbf{这样市值/估值的历史序列就能完整重建}，不依赖任何"只给近期"的接口。
+\end{quote}
+\subsection{\texorpdfstring{四、字段映射：原始数据 \ensuremath{\rightarrow} 因子 / 暴露}{四、字段映射：原始数据 → 因子 / 暴露}}
+\subsubsection{\texorpdfstring{4.1 信号线（因子模块）🟢 文档 \S{}3--\S{}5}{4.1 信号线（因子模块）🟢 文档 §3–§5}}
+{\small
+\begin{longtable}{p{4.97cm}p{7.99cm}p{3.24cm}}
+\toprule
+因子 & 构造 & 数据来源 \\
+\midrule
+\textbf{动量} 12-1 & 过去 12 个月累计收益、跳过最近 1 个月 & 日行情 \\
+\textbf{价值} & BP = 净资产/市值（反向，便宜者高分） & 财务 + 计算市值 \\
+\textbf{质量} & ROE = 净利润/净资产 & 财务 \\
+（可选）波动率 / 流动性 & 见下 & 日行情 \\
+\bottomrule
+\end{longtable}
+}
+\subsubsection{\texorpdfstring{4.2 风险线（横截面 B）🟢 文档 \S{}6.4}{4.2 风险线（横截面 B）🟢 文档 §6.4}}
+\textbf{暴露矩阵 $B$ = 行业暴露 + 风格暴露}
+{\small
+\begin{longtable}{p{6.60cm}p{5.70cm}p{3.90cm}}
+\toprule
+暴露 & 构造 & 需要 \\
+\midrule
+\textbf{行业}（分类哑变量） & 巨潮行业分类（PIT） & 源 3 \\
+\textbf{size} & $\log(\text{市值})$ & 计算市值 \\
+\textbf{value} & $-\log(PB)$ 或 BP & 计算 \\
+\textbf{momentum} & 12-1 月收益 & 日行情 \\
+\textbf{volatility} & 过去 N 日收益标准差 & 日行情 \\
+\textbf{liquidity} & 过去 N 日换手率均值 & 日行情 \\
+\textbf{beta} & 对市场指数收益回归 & 日行情 + 指数 \\
+\bottomrule
+\end{longtable}
+}
+\textbf{横截面标准化}：每个 $t$ 日，对连续风格暴露做 \textbf{z-score}（减均值除标准差），与 Barra 口径一致。
+\subsection{\texorpdfstring{五、关键数据处理（写进代码前的硬约束）}{五、关键数据处理（写进代码前的硬约束）}}
+{\small
+\begin{longtable}{p{1.26cm}p{2.49cm}p{8.64cm}p{3.81cm}}
+\toprule
+\# & 处理 & 做法 & 标注 \\
+\midrule
+1 & \textbf{复权} & 用\textbf{前复权}价算收益（避免除权日假跳空）；同时保留原始价 & 🟢 文档 \S{}2.2 \\
+2 & \textbf{停牌} & \texttt{tradestatus} / 成交量为 0 的日剔除或前值填充 & 🟢 文档 \S{}7 \\
+3 & \textbf{ST / 退市} & 剔除（或用 \texttt{isST} 标记剔除） & 🟢 文档 \S{}2.2 \\
+4 & \textbf{上市不足 N 日} & 剔除（默认 N=250） & 🟡 \\
+5 & \textbf{PIT：财务} & 按\textbf{披露日期}生效，不用报告期 & 🟢 文档 \S{}2.2 \\
+6 & \textbf{PIT：行业} & 用巨潮的\textbf{变更日期} & 🟢 文档 \S{}2.2 \\
+7 & \textbf{股票池定义} & \textbf{全A 过滤}（剔 ST/停牌/次新），\textbf{不绑死沪深300 历史成分} & 🟡 绕开 PIT 缺口（见 \S{}六） \\
+8 & \textbf{基准} & \textbf{等权沪深300}（避开历史权重 PIT） & 🟡 \\
+9 & \textbf{对齐} & 收益与暴露按 \texttt{(date, stock\_code)} 严格对齐 & 🟢 文档 \S{}6.2 \\
+\bottomrule
+\end{longtable}
+}
+\subsection{\texorpdfstring{六、缺口与绕法}{六、缺口与绕法}}
+{\small
+\begin{longtable}{p{5.92cm}p{1.26cm}p{9.02cm}}
+\toprule
+缺口 & 严重度 & 绕法 \\
+\midrule
+\textbf{历史成分股名单}（中证接口不支持指定日期） & 中 & \textbf{股票池改用"全A 过滤"}，不依赖历史成分；基准用\textbf{等权沪深300} \\
+\textbf{行业映射需逐股查询}（\textasciitilde{}5571 次 API） & 低 & 逐股取巨潮接口 + \textbf{限速}（避免被拒）；结果\textbf{缓存}到本地，只取一次 \\
+\textbf{东财快照类全挂} & 低 & 用新浪/腾讯替代（已确认可用） \\
+\textbf{百度市值只有近一年} & 低 & 已被 \S{}三 的\textbf{计算法}取代 \\
+\bottomrule
+\end{longtable}
+}
+\subsection{\texorpdfstring{七、存储与目录}{七、存储与目录}}
+\textbf{存储}：用 \textbf{Parquet}（日频 \ensuremath{\times} 全A \ensuremath{\times} 10 年 \ensuremath{\approx} 数百万行，\textbf{Excel 放不下}，仅做抽样展示）。
+\begin{verbatim}
+就业\东方证券alpha优化\
+├─ data\                    （代码生成，不入库）
+│  ├─ daily.parquet         日行情（date, code, open, high, low, close, volume, amount, turn, ...）
+│  ├─ financial.parquet     财务（code, 报告期, 披露日, 净利, 净资产, 每股…）
+│  ├─ industry.parquet      行业（code, 行业, 生效日）
+│  └─ index_hs300.parquet   沪深300 成分 + 权重
+├─ 因子降维与合成_思路流程.*   （已审）
+├─ 横截面风险估计_优化点B_思路流程.* （已审）
+├─ 数据获取方案.*            （本文档）
+├─ _fetch_data.py           【待写】数据抓取
+├─ _factor_module.R         【待写】因子模块（信号线）
+└─ _crosssec_wls.R          【待写】横截面 WLS（风险线）
+\end{verbatim}
+\subsection{\texorpdfstring{八、【前提 / 约束 / 缺陷】}{八、【前提 / 约束 / 缺陷】}}
+{\small
+\begin{longtable}{p{1.24cm}p{14.96cm}}
+\toprule
+类 & 内容 \\
+\midrule
+\textbf{前提} & 本机网络维持现状（新浪/腾讯/中证/巨潮可用）；akshare 1.19.1 已装 \\
+\textbf{约束} & (1) 只用"实测可用"的源，\textbf{不写东财快照类}；(2) 逐股接口\textbf{必须限速 + 缓存}；(3) 全部按 PIT 处理；(4) 存储用 parquet \\
+\textbf{缺陷} & (1) 股票池用"全A 过滤"而非真实历史成分 \ensuremath{\Longrightarrow} 与真实沪深300 相对策略\textbf{不完全一致}；(2) 基准用等权 \ensuremath{\Longrightarrow} 与真实市值加权基准\textbf{有偏差}；(3) 行业映射逐股抓，\textbf{覆盖可能不全}；(4) 我们自建暴露 \ensuremath{\ne} 东方证券真实暴露（\textbf{replica 非复现}） \\
+\bottomrule
+\end{longtable}
+}
+\subsection{\texorpdfstring{九、下一步}{九、下一步}}
+\begin{enumerate}
+  \item 本方案审通过后 \ensuremath{\rightarrow} 写 \textbf{\texttt{\_fetch\_data.py}}（抓取 + 落 parquet）；
+  \item 抓取跑通 \ensuremath{\rightarrow} 写两份独立代码：\textbf{\texttt{\_factor\_module.R}}（信号线）、\textbf{\texttt{\_crosssec\_wls.R}}（风险线）；
+  \item 各自独立验证 \ensuremath{\rightarrow} 最后整合。
+\end{enumerate}
+\begin{quote}
+\textbf{文档信息}
+
+- 路径：\texttt{Desktop\textbackslash{}就业\textbackslash{}东方证券alpha优化\textbackslash{}数据获取方案.md}
+
+- 状态：\textbf{v1（2026-10-02）待审查}
+
+- 前置：\texttt{因子降维与合成\_思路流程.pdf}、\texttt{横截面风险估计\_优化点B\_思路流程.pdf}
+\end{quote}
+\end{document}

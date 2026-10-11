@@ -1,0 +1,337 @@
+\documentclass[11pt]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{ctex}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\providecommand{\cmrsideswitch}{}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue,urlcolor=blue]{hyperref}
+\renewcommand{\arraystretch}{1.25}
+\setlength{\parskip}{0.4em}
+\setcounter{secnumdepth}{0}
+\makeatletter
+\renewcommand\subsection{\@startsection{subsection}{2}{\z@}{-3.25ex\@plus -1ex \@minus -.2ex}{1.5ex \@plus .2ex}{\normalfont\LARGE\bfseries}}
+\renewcommand\subsubsection{\@startsection{subsubsection}{3}{\z@}{-3.25ex\@plus -1ex \@minus -.2ex}{1.5ex \@plus .2ex}{\normalfont\large\bfseries}}
+\makeatother
+\title{因子降维有效性论证}
+\author{常笑涵}
+\date{Semester 2, 2026}
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+作者：常笑涵
+学期：Semester 2, 2026
+日期：2026-10-11
+\subsection{\texorpdfstring{总结}{总结}}
+把 $J=24$ 个因子降维成 $G$ 个因子块，在综合打分上可以做到零损失；同时把下游要估的参数从 300 降到 55 或 21，让模型从参数压力过大变成可稳定估计。
+本报告论证的是降维本身的有效性，不主张降维后的分数在横截面上的相对收益优于其他模型。
+\subsection{\texorpdfstring{一、目标}{一、目标}}
+把 24 个因子降维成 $G$ 个因子块，同时满足两件事：
+\begin{enumerate}
+  \item 结果跟原来区别不大：降维后的综合打分与未降维的基本一致。
+  \item 大幅减少因子量：下游的权重估计、协方差估计要估的参数显著变少。
+\end{enumerate}
+这里的目标不是让结果更好，而是结果差不多，但算得起、估得稳。
+\subsection{\texorpdfstring{二、结论}{二、结论}}
+两条目标均达成。
+\begin{enumerate}
+  \item 可证明：第三部分的恒等式和第四部分的数值验证表明，在特定加权口径下，降维分数与未降维分数完全一致。
+  \item 已量化：下游参数从 300 降到 55 或 21，参数压力大幅下降。
+\end{enumerate}
+\subsection{\texorpdfstring{三、命题与证明}{三、命题与证明}}
+\subsubsection{\texorpdfstring{记号}{记号}}
+{\small
+\begin{longtable}{p{1.29cm}p{14.91cm}}
+\toprule
+符号 & 含义 \\
+\midrule
+$z_j$ & 第 $j$ 个因子的暴露，已做方向统一、去极值、按日横截面标准化 \\
+$\mathrm{sgn}_j$ & 第 $j$ 个因子的方向符号，使其与未来收益正相关 \\
+$S_{eq}$ & 未降维的等权综合分数，$S_{eq}=\frac{1}{J}\sum_{j=1}^{J}\mathrm{sgn}_j\,z_j$ \\
+$G$ & 因子块个数 \\
+$n_g$ & 第 $g$ 块包含的因子个数，$\sum_{g=1}^{G} n_g=J$ \\
+$B_g$ & 第 $g$ 块的块分数（块内等权），$B_g=\frac{1}{n_g}\sum_{j\in g}\mathrm{sgn}_j\,z_j$ \\
+$w_g$ & 第 $g$ 块的权重 \\
+$S_G$ & 降维后的综合分数，$S_G=\sum_{g=1}^{G} w_g\,B_g$ \\
+\bottomrule
+\end{longtable}
+}
+\subsubsection{\texorpdfstring{命题}{命题}}
+取块权 $w_g=\dfrac{n_g}{J}$（即块权与块大小成正比）时，降维分数与未降维分数恒等：
+\[
+S_G \equiv S_{eq}
+\]
+\subsubsection{\texorpdfstring{证明}{证明}}
+\[
+\sum_{g=1}^{G} w_g B_g=\sum_{g=1}^{G}\frac{n_g}{J}\cdot\frac{1}{n_g}\sum_{j\in g}\mathrm{sgn}_j z_j=\frac{1}{J}\sum_{g=1}^{G}\sum_{j\in g}\mathrm{sgn}_j z_j=\frac{1}{J}\sum_{j=1}^{J}\mathrm{sgn}_j z_j=S_{eq}
+\]
+证明的关键只有一步：把 $w_g=n_g/J$ 代入后，块大小 $n_g$ 被约掉，于是块内平均与块间加权合并成了对全部因子的一次完整求和。
+\subsubsection{\texorpdfstring{推论}{推论}}
+任何等大小的划分都满足这个恒等。例如 24 个因子按 4 个一组分成 6 块，此时 $w_g=n_g/J=1/G$，恰好就是块间等权。
+\subsubsection{\texorpdfstring{从上述论证说明}{从上述论证说明}}
+\begin{enumerate}
+  \item 降维本身不损失信息：$G$ 个块分数可以无损表示 $J$ 个因子的等权分数。
+  \item 降维的代价不在分数这一层，而在模型这一层 ------ 也就是块内等权这个约束（见第六部分）。
+  \item 如果观察到降维后分数变了，变化必定来自块权 $w_g$ 的取法，而不是来自降维本身。
+\end{enumerate}
+\subsection{\texorpdfstring{四、数值验证}{四、数值验证}}
+这一部分的目的不是重新证明命题，而是用实际数据确认：在真实股票池、真实缺失值处理和真实标准化流程下，第三部分的恒等式确实逐日、逐股票成立。
+\subsubsection{\texorpdfstring{验证逻辑}{验证逻辑}}
+每天、每只股票都有一组因子暴露。记：
+{\small
+\begin{longtable}{p{1.27cm}p{14.93cm}}
+\toprule
+符号 & 含义 \\
+\midrule
+$t$ & 交易日 \\
+$i$ & 股票 \\
+$j$ & 因子，$j=1,\dots,24$ \\
+$z_{j,t,i}$ & 第 $j$ 个因子在 $t$ 日对股票 $i$ 的暴露（已方向统一、去极值、横截面标准化） \\
+$\mathrm{sgn}_j$ & 第 $j$ 个因子的方向符号 \\
+$r_{t+1,i}$ & 股票 $i$ 的未来收益（实际用未来 21 天收益） \\
+$n_g$ & 第 $g$ 块包含的因子个数 \\
+\bottomrule
+\end{longtable}
+}
+块分数（块内等权）：
+\[
+B_{g,t,i}=\frac{1}{n_g}\sum_{j\in g}\mathrm{sgn}_j\,z_{j,t,i}
+\]
+未降维的等权综合分数：
+\[
+S_{eq,t,i}=\frac{1}{J}\sum_{j=1}^{J}\mathrm{sgn}_j\,z_{j,t,i}
+\]
+降维后的综合分数：
+\[
+S_{G,t,i}=\sum_{g=1}^{G} w_g\,B_{g,t,i}
+\]
+本验证取块权与块大小成正比 $w_g=\dfrac{n_g}{J}$，代入后：
+\[
+S_{G,t,i}=\sum_{g}\frac{n_g}{J}\cdot\frac{1}{n_g}\sum_{j\in g}\mathrm{sgn}_j z_{j,t,i}=\frac{1}{J}\sum_{j=1}^{J}\mathrm{sgn}_j z_{j,t,i}=S_{eq,t,i}
+\]
+也就是说，对每个交易日 $t$、每只股票 $i$，理论上都有 $S_{G,t,i}\equiv S_{eq,t,i}$。
+\subsubsection{\texorpdfstring{IC}{IC}}
+未降维分数的 IC：$\mathrm{IC}_{eq,t}=\mathrm{corr}\big(S_{eq,t},\,r_{t+1}\big)$
+降维分数的 IC：$\mathrm{IC}_{G,t}=\mathrm{corr}\big(S_{G,t},\,r_{t+1}\big)$
+这里 $\mathrm{corr}$ 是当天所有股票的横截面相关，通常用 Pearson 或 Spearman 秩相关。
+验证的核心指标是逐日 IC 之差：
+\[
+\Delta \mathrm{IC}_t=\mathrm{IC}_{G,t}-\mathrm{IC}_{eq,t}
+\]
+因为恒等式保证 $S_{G,t,i}=S_{eq,t,i}$，所以自然有 $\mathrm{IC}_{G,t}=\mathrm{IC}_{eq,t}$，即 $\Delta \mathrm{IC}_t=0$。
+\subsubsection{\texorpdfstring{验证结果}{验证结果}}
+对每个 $G$，把块权取成与 $n_g$ 成正比，分别计算降维分数与未降维分数的逐日横截面 IC 之差。结果：
+{\small
+\begin{longtable}{p{10.80cm}p{5.40cm}}
+\toprule
+训练窗 & $G=12,10,8,6,4,3,2$ \\
+\midrule
+2017--2021 & $\Delta\mathrm{IC}=0$ \\
+2022--2023 & $\Delta\mathrm{IC}=0$ \\
+\bottomrule
+\end{longtable}
+}
+最差的一天也是 0。两个窗口、全部 $G$，逐日精确为 0，与第三部分的恒等式完全吻合。
+这说明：在实际数据里，只要采用块权与块大小成正比的降维方式，降维分数和未降维分数就逐点完全一致，IC 自然也完全一致。代码实现、缺失值处理和股票池筛选都没有破坏这个恒等式。
+\subsubsection{\texorpdfstring{辅助证据：换成块间等权时}{辅助证据：换成块间等权时}}
+如果不用 $w_g=n_g/J$，而用块间等权 $w_g=1/G$：
+\[
+S'_{G,t,i}=\sum_{g=1}^{G}\frac{1}{G}\,B_{g,t,i}
+\]
+这时 $S'_G$ 不再恒等于 $S_{eq}$，所以不能再用$\Delta\mathrm{IC}=0$来验证，改用日横截面秩相关：
+\[
+\rho_t=\mathrm{Spearman}\big(S'_{G,t},\,S_{eq,t}\big)
+\]
+结果：
+\begin{itemize}
+  \item $\rho_t$ 范围为 0.888 -- 0.969
+  \item 最差的一天为 0.828
+  \item 该秩相关的 95\% 置信区间宽度仅约 $\pm 0.004$（对 484 个交易日的均值而言），精度足以支撑区别不大的判断
+\end{itemize}
+置信区间用 Fisher 变换理解：
+\[
+z_t=\mathrm{artanh}(\rho_t)=\frac{1}{2}\ln\frac{1+\rho_t}{1-\rho_t},\qquad \mathrm{SE}(z_t)\approx\frac{1}{\sqrt{N_t-3}}
+\]
+\[
+z_t \pm 1.96\,\mathrm{SE}(z_t)\ \xrightarrow{\ \tanh\ }\ \rho_{\text{lower}},\ \rho_{\text{upper}}
+\]
+其中 $N_t$ 是当天股票数。区间很窄，说明估计精度很高。
+\begin{quote}
+但要注意：这里的差异来自块间等权导致的隐式重加权，不是降维本身造成的。块越小，块内因子实际权重越高；块越大，块内因子实际权重越低。
+\end{quote}
+\subsubsection{\texorpdfstring{因子块跨训练子期的一致性}{因子块跨训练子期的一致性}}
+把训练期分成 4 个子期，在每个子期分别做因子聚类，得到每个子期的因子块划分，然后用调整兰德指数 ARI 比较不同子期之间块划分的一致性：
+\[
+\mathrm{ARI}=\frac{A-\mathbb{E}[A]}{\max(A)-\mathbb{E}[A]}
+\]
+其中 $A$ 是在两侧都属于同一块的因子对数，$\mathbb{E}[A]$ 是它在随机划分下的期望。ARI 的含义：
+{\small
+\begin{longtable}{p{5.40cm}p{10.80cm}}
+\toprule
+取值 & 含义 \\
+\midrule
+$1$ & 完全一致 \\
+$0$ & 随机水平 \\
+负值 & 比随机还差 \\
+\bottomrule
+\end{longtable}
+}
+结果：
+{\small
+\begin{longtable}{p{1.71cm}p{5.97cm}p{8.53cm}}
+\toprule
+降维档 & 兰德指数 RI（未校正） & 调整兰德指数 ARI（本报告采用） \\
+\midrule
+$G=10$ & 0.967 -- 1.000 & 0.818 -- 1.000 \\
+$G=6$ & 0.851 -- 0.964 & 0.512 -- 0.885 \\
+\bottomrule
+\end{longtable}
+}
+\begin{quote}
+说明：兰德指数 RI 未校正随机水平。24 个因子分成 10 块时，随机也会同块的比例不低，RI 偏乐观，应以 ARI 为准。
+
+读法：$G=10$ 下 ARI 为 0.82 -- 1.00，说明分块高度稳定，不是偶然；$G=6$ 下 ARI 掉到 0.51 -- 0.89，说明压到 6 块时划分本身开始不稳。
+\end{quote}
+另记录一个事实：$G=10$ 的分块规模是 1 / 1 / 1 / 2 / 2 / 2 / 3 / 3 / 3 / 6（最大一块 6 个因子、最小一块 1 个），即高度不均衡。这既是第六部分隐式重加权的来源，也是它跨子期稳定的原因。
+\subsubsection{\texorpdfstring{本部分结论}{本部分结论}}
+\begin{enumerate}
+  \item 在 $w_g=n_g/J$ 下，降维分数与未降维分数逐日、逐股票完全一致，IC 差为 0。
+  \item 若换用块间等权 $w_g=1/G$，分数会变，但差异不大，且变化来自隐式重加权，不是降维本身。
+  \item 因子块划分跨训练子期高度一致（$G=10$ 时 ARI 0.82--1.00），说明分块结果稳定、具有持续性，不是一次性偶然现象。
+\end{enumerate}
+\subsection{\texorpdfstring{五、下游计算负担：为什么降维很重要}{五、下游计算负担：为什么降维很重要}}
+下游要估的是因子或块之间的协方差矩阵 $\Sigma$。$G$ 个块对应 $G(G+1)/2$ 个参数。
+{\small
+\begin{longtable}{p{3.89cm}p{2.92cm}p{4.54cm}p{4.86cm}}
+\toprule
+方案 & 因子/块数 & $\Sigma$ 参数个数 & 参数 / 有效样本 \\
+\midrule
+未降维 & 24 & 300 & 5.18 \\
+降维到 $G=10$ & 10 & 55 & 约 0.95 \\
+降维到 $G=6$ & 6 & 21 & 约 0.36 \\
+\bottomrule
+\end{longtable}
+}
+\begin{quote}
+参数 / 有效样本 = 要估的参数个数 \ensuremath{\div} 有效独立样本数。由于前瞻收益有 21 天重叠，日频 IC 序列的有效独立样本数约为天数 \ensuremath{\div} 21。
+\end{quote}
+\begin{itemize}
+  \item 该比值大于 1：要估的参数比有效数据还多，估计量容易不稳定。
+  \item 该比值小于 1：参数数量相对有效样本可控，估计更稳。
+\end{itemize}
+结论：降维把下游估计从参数压力过大、容易不稳定变成良态、可稳定估计，而且 $G$ 越小越宽松。这不仅仅是算得快，更重要的是算得准、算得稳。
+具体作用：
+\begin{itemize}
+  \item 协方差矩阵估计更可靠：不会因为微小数据变化就剧烈波动。
+  \item 矩阵可逆：组合优化不会因为矩阵不可逆或求逆爆炸而崩溃。
+  \item 权重估计更稳：极端权重更少，换手率更低，样本外表现更稳健。
+  \item 风险预测更准：因子相关性、因子风险更可信。
+  \item 下游模型更可信：无论是均值方差优化、风险平价，还是贝叶斯收缩，都依赖协方差矩阵。矩阵不准，整个策略就不稳。
+\end{itemize}
+\subsection{\texorpdfstring{六、代价}{六、代价}}
+\subsubsection{\texorpdfstring{模型有损失}{模型有损失}}
+第三部分的恒等式保证的是综合分数一致。但如果把块内等权当作对回归系数的约束（强制 $\gamma_j=\beta_g/n_g$），这个约束是有代价的：
+{\small
+\begin{longtable}{p{6.48cm}p{2.78cm}p{6.94cm}}
+\toprule
+指标 & 未降维 & 降维到 $G=10$ \\
+\midrule
+RSS & 基准 & +3.20\% \\
+$R^2$ & 10.79\% & 10.45\% \\
+$R^2$ 绝对变化 & --- & \ensuremath{-}0.34 个百分点 \\
+\bottomrule
+\end{longtable}
+}
+这是降维的成本。
+用参数限制检验（F 检验，与 $\mathrm{HAR}\subset\mathrm{AR}(10)$ 同形式，$q=J-G$）会拒绝该约束。但要注意：该检验的残差自由度约为 413 万，功效极大，任何非零损失都会拒绝。
+\begin{quote}
+它回答的是约束是否严格成立（答案是不严格）；它回答不了损失是否可忽略。降维的有效性由第三部分（理论）与第四部分（数值）论证，此处仅作为为什么 F 检验不适用的解释。
+\end{quote}
+\subsubsection{\texorpdfstring{块加权}{块加权}}
+若块权取 $w_g=n_g/J$（与块大小成正比），则降维是无损的。
+若块权取块间等权 $w_g=1/G$，则每个因子的实际权重是：
+\[
+e_f=\frac{1}{G}\cdot\frac{\mathrm{sgn}_f}{n_{g(f)}}
+\]
+也就是说，块越小，块内因子权重越高；块越大，块内因子权重越低。此时降维后的分数与未降维分数的差异，100\% 来自这个按块大小反比的隐式重加权，与降维本身无关。
+但还有一层限制：即使取块权与块大小成正比（此时分数无损），在理论层面仍无法与24 个参数各估一个权重的最优未降维模型比较 ------ 因为块内等权会让强因子与弱因子共用同一个权重，而未降维的最优模型可以自动给强因子高权重。这是用 $G$ 个参数换 $J$ 个参数所必须放弃的自由度。
+这一层的结论目前是悬置的：实测下来，均值 IC 与 ICIR 给出了相反的答案（前者偏向未降维，后者偏向降维），所以在信号层无法定论。
+为什么这条判断要留到下一层？
+\begin{itemize}
+  \item 均值 IC 衡量信号的平均预测力；ICIR 衡量平均预测力 \ensuremath{\div} 预测力波动。同一个比较里，前者偏向未降维模型，后者偏向降维模型。
+  \item 决定该用哪一个的，是信号进入组合层的方式：
+  \item 若优化器对信号做风险缩放（例如均值-方差框架下的 $w\propto\Sigma^{-1}s$），进入目标函数的是 $s/\sigma_s$，ICIR 才是相关的量；
+  \item 若只是按分数排序选股（如 top-$k$ 等权），结果由平均排序正确率决定，均值 IC 才是相关的量。
+  \item 所以必须由下一层（组合层）来判定：把同一个分数送进优化器 ------ 目标函数为$\text{alpha}-\text{主动风险}-\text{换手/交易成本}$，带单票上限、行业与风格约束 ------ 求出目标权重并回测，比较主动收益、主动 IR、净收益、换手、成本敏感性。只有组合层的指标才能判断低 IC 波动是否真的值钱。
+\end{itemize}
+\begin{quote}
+一个必须绑定的前提：组合层的信噪比天然低于信号层，上一轮的项目已经验证过组合层的结论会随设定变化。因此这一层的结论必须与固定的股票池、约束、成本与成交价口径绑定来读，否则不可比。
+\end{quote}
+\subsection{\texorpdfstring{七、标注与交付物}{七、标注与交付物}}
+标注：
+{\small
+\begin{longtable}{p{5.96cm}p{10.24cm}}
+\toprule
+内容 & 标注 \\
+\midrule
+参数限制检验（F 检验） & 🟢 课内（ETX5460 W9 + Project 2 Q3，$\mathrm{HAR}\subset\mathrm{AR}(10)$） \\
+有效样本 / 重叠窗口的处理 & 🔴 发散（时间序列重叠的标准处理） \\
+因子构造、聚类、降维曲线 & 🔴 发散（业界通用做法） \\
+调整兰德指数 ARI & 🔴 发散（聚类一致性标准工具） \\
+\bottomrule
+\end{longtable}
+}
+交付物：
+{\small
+\begin{longtable}{p{7.17cm}p{9.03cm}}
+\toprule
+类型 & 文件 \\
+\midrule
+论证脚本（降维无损验证） & \texttt{\_stage5\_challenge.R} \\
+论证脚本（降维曲线） & \texttt{\_stage3\_compress.R} \\
+检验脚本（F 检验 + 等价性检验） & \texttt{\_stage4\_equiv.R} \\
+一致性脚本（RI / ARI） & \texttt{\_stage5b\_ari.R} \\
+数据产物 & \texttt{\_factor\_panel2.parquet}（24 因子面板） \\
+\bottomrule
+\end{longtable}
+}
+\subsection{\texorpdfstring{八、数据出处}{八、数据出处}}
+本报告所有数字的出处统一列在此处。除标注数学推导者外，均来自本地脚本的运行日志，可复现。
+{\small
+\begin{longtable}{p{1.46cm}p{5.84cm}p{8.90cm}}
+\toprule
+报告位置 & 关键数字 & 出处 \\
+\midrule
+第三部分 命题与证明 & --- & 数学推导，不依赖数据 \\
+第四部分 验证结果 & 两个窗口、全部 $G$ 的 $\Delta\mathrm{IC}=0$ & 脚本 \texttt{\_stage5\_challenge.R}；日志 \texttt{\_stage5\_challenge.log}（训练窗 2017--2021）、\texttt{\_stage5\_challenge\_swap.log}（训练窗 2022--2023） \\
+第四部分 辅助证据 & 秩相关 0.888--0.969、最差一天 0.828、95\% 置信区间宽约 \ensuremath{\pm}0.004 & 脚本 \texttt{\_stage3\_compress.R}；日志 \texttt{\_stage3\_compress.log} \\
+第四部分 因子块一致性 & RI 0.851--1.000、ARI 0.512--1.000、分块规模 1/1/1/2/2/2/3/3/3/6 & 脚本 \texttt{\_stage5b\_ari.R}；日志 \texttt{\_stage5b\_ari.log} \\
+第五部分 下游计算负担 & 参数 300 / 55 / 21；条件数 2020 / 72.6 / 41.2；参数与有效样本之比 5.18 / 0.95 / 0.36 & 脚本 \texttt{\_stage3\_compress.R}；日志 \texttt{\_stage3\_compress.log} \\
+第六部分 模型有损失 & RSS +3.20\%、$R^2$ 10.79\% \ensuremath{\rightarrow} 10.45\%、残差自由度约 413 万 & 脚本 \texttt{\_stage4\_equiv.R}；日志 \texttt{\_stage4\_equiv.log} \\
+第六部分 块加权 & 权重表达式 & 数学推导 \\
+\bottomrule
+\end{longtable}
+}
+底层数据：
+{\small
+\begin{longtable}{p{2.78cm}p{13.42cm}}
+\toprule
+项 & 说明 \\
+\midrule
+行情与财务原始数据 & \texttt{data/daily.parquet}（5162 只股票，2016-01-04 至 2025-12-31）、\texttt{data/financial.parquet} \\
+因子面板 & \texttt{\_factor\_panel2.parquet}（24 个因子，已完成方向统一、去极值、按日横截面标准化） \\
+未来收益口径 & 未来 21 个交易日收益，价格为前复权收盘价 \\
+训练窗 & 2017-01-03 至 2021-12-31，1217 个交易日 \\
+验证窗 & 2022-01-04 至 2023-12-29，484 个交易日 \\
+冻结样本外 & 2024 至 2025 年，464 个交易日，本报告全程未使用 \\
+\bottomrule
+\end{longtable}
+}
+\subsection{\texorpdfstring{结束语}{结束语}}
+本报告证明并量化了一个降维方案：它不改变综合打分，却大幅降低下游估计负担。
+正确使用它的关键，是写清加权口径，并理解模型层的取舍。这样，因子降维就不再是一个牺牲效果换速度的妥协，而是一个分数无损、估计更稳的工程优化方案。
+至于能否替代最优未降维加权模型这一点，则属于下一层（组合层）的议题 ------ 本报告在第六部分已说明它为什么无法在信号层判定。
+\end{document}

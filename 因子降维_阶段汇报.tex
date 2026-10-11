@@ -1,0 +1,221 @@
+\documentclass[11pt]{article}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{ctex}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\providecommand{\cmrsideswitch}{}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue,urlcolor=blue]{hyperref}
+\renewcommand{\arraystretch}{1.25}
+\setlength{\parskip}{0.4em}
+\title{因子降维 阶段汇报（诊断与扩池）}
+\author{常笑涵}
+\date{Semester 2, 2026}
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+\begin{quote}
+\textbf{一句话}：把 24 个因子"降维"成少数几块再合成综合打分。目前完成了\textbf{第一步诊断 + 扩池}，还没开始真正的降维；\textbf{降维有价值，但聚类基准要换一个}。
+
+\textbf{日期}：2026-10-10　\textbf{性质}：阶段性汇报（含下一步计划），用于对外交流
+
+\textbf{标注规则}：🟢【课内】= 课程讲义讲过；🟡【半课内】= 课程提过但没展开；🔴【发散】= 课程外，业界通用做法
+\end{quote}
+\subsection{\texorpdfstring{零、30 秒摘要}{零、30 秒摘要}}
+{\small
+\begin{longtable}{p{2.27cm}p{13.93cm}}
+\toprule
+问题 & 答案 \\
+\midrule
+在做什么 & 把 24 个因子的信号\textbf{降维}成少数几个"因子块"，再合成一个综合打分（score） \\
+做到哪了 & 完成\textbf{第一步：诊断 + 扩池}；真正的降维还没开始 \\
+降维值得做吗 & \textbf{值得} ------ 但聚类的"相似度"要按\textbf{暴露相关}，不是按\textbf{预测力相关}（这条改了原方案） \\
+有没有意外收获 & 有：诊断过程中\textbf{发现并修正了一个数据口径 bug}，价值因子因此"复活" \\
+下一步 & 聚类定块数 \ensuremath{\rightarrow} 定块权重 \ensuremath{\rightarrow} 用\textbf{冻结样本外}验收 \\
+\bottomrule
+\end{longtable}
+}
+\subsection{\texorpdfstring{一、背景（一句话版）}{一、背景（一句话版）}}
+Alpha 策略的链路是：\textbf{因子 \ensuremath{\rightarrow} 综合打分（score）\ensuremath{\rightarrow} 优化器 \ensuremath{\rightarrow} 交易}。
+因子的麻烦是：\textbf{数量多、彼此重复}。比如"波动率""特质波动率""日内振幅"是三个名字，说的基本是同一件事 ------ 如果把它们都塞进合成打分，等于\textbf{同一件事被重复投了三票}。
+原方案的思路分三步：
+\begin{enumerate}
+  \item \textbf{聚类降维}：把 24 个因子按相似度分成几"块"，块内合并、块间保留
+  \item \textbf{定权重}：块与块之间，按"谁更有效 + 谁和谁不重复"分配权重
+  \item \textbf{压极端权重}：权重容易跑出负值或极端值，用收缩压住
+\end{enumerate}
+\subsection{\texorpdfstring{二、为什么先做诊断，而不是直接聚类}{二、为什么先做诊断，而不是直接聚类}}
+上一轮（风险模型的优化）吃过这个亏：\textbf{花了很多轮改方法，最后发现是"数据里根本没那么多信息"}。
+所以这次把顺序倒过来：\textbf{先检查"降维"这个设想在这批数据上到底有没有空间}，再动手写代码。
+诊断要回答三个问题：
+{\small
+\begin{longtable}{p{1.80cm}p{14.40cm}}
+\toprule
+ & 问题 \\
+\midrule
+\textbf{Q1} & 因子之间\textbf{真的有冗余}吗？ \\
+\textbf{Q2} & 冗余\textbf{稳不稳}？是长期结构，还是某几年的偶然？ \\
+\textbf{Q3} & 降维\textbf{会不会丢信息}？合并之后信号变好还是变差？ \\
+\bottomrule
+\end{longtable}
+}
+\textbf{同时加了四道"防自欺"的检查} 🔴：
+{\small
+\begin{longtable}{p{4.86cm}p{11.34cm}}
+\toprule
+检查 & 作用 \\
+\midrule
+\textbf{安慰剂} & 把数据打乱，看结论还成立吗 \\
+\textbf{非重叠子样本} & 排除"重叠窗口"造成的假相关 \\
+\textbf{两种相似度对照} & 暴露相关 vs 预测力相关，看它们是否一致 \\
+\textbf{oracle 上界} & 用"上帝视角"算出最好能有多好，避免白费功夫 \\
+\bottomrule
+\end{longtable}
+}
+\subsection{\texorpdfstring{三、诊断结果}{三、诊断结果}}
+\subsubsection{\texorpdfstring{3.1 冗余是真的，不是错觉}{3.1 冗余是真的，不是错觉}}
+{\small
+\begin{longtable}{p{5.15cm}p{2.95cm}p{8.10cm}}
+\toprule
+检验 & 平均相关 & 有效因子数（共 24 个） \\
+\midrule
+\textbf{实际数据} & 0.386 & \textbf{3.87} \\
+安慰剂（打乱） & 0.018 & 23.75 \\
+非重叠子样本 & 0.389 & 3.80 \\
+\bottomrule
+\end{longtable}
+}
+\textbf{读法}：如果 24 个因子互不重复，有效因子数应接近 24；实际只有 \textbf{3.87}。而打乱之后立刻回到 23.75 \ensuremath{\Longrightarrow} \textbf{冗余是真实的，不是噪声}。非重叠子样本结果一致 \ensuremath{\Longrightarrow} \textbf{也不是重叠窗口造的假象}。
+\begin{quote}
+\textbf{一句话：24 个因子，实际只装了不到 4 个因子的信息量。}
+\end{quote}
+\subsubsection{\texorpdfstring{3.2 但冗余的"形态"和预想不同 $\star$$\star$}{3.2 但冗余的"形态"和预想不同 ★★}}
+原方案准备按 \textbf{"预测力相关"} 聚类（两个因子的预测力曲线走得近，就认为它们重复）。诊断发现这条\textbf{不成立}：
+{\small
+\begin{longtable}{p{4.91cm}p{2.45cm}p{8.84cm}}
+\toprule
+因子对 & 预测力相关 & \textbf{暴露相关}（每天的股票排序像不像） \\
+\midrule
+营收增速 vs 日内振幅 & \textbf{+0.992} & +0.088 \\
+市值 vs 换手率 & +0.959 & \textbf{\ensuremath{-}0.380} \\
+\bottomrule
+\end{longtable}
+}
+\textbf{"营收增速"的预测力是 0（纯噪声），"日内振幅"的预测力很强（t = \ensuremath{-}10）。这两个因子每天的股票排序几乎毫不相干（0.088），但它们的预测力曲线却同步到 0.992。}
+这说明 \textbf{"预测力相关"量的是共同的时间成分（市场风格轮动），不是"信息重复"。}
+\textbf{后果}：按预测力聚类，会把这两个毫无关系的因子并成一块、再各投半票 ------ \textbf{正好是它本来想避免的事}。
+\begin{quote}
+\textbf{建议：聚类改按「暴露相关」，预测力相关降为对照。}（这条推翻了原方案的一处既定决策）
+\end{quote}
+好消息是，\textbf{暴露相关分出来的块，都能用经济含义说清}：
+{\small
+\begin{longtable}{p{5.74cm}p{10.46cm}}
+\toprule
+因子块 & 成员 \\
+\midrule
+\textbf{波动率簇} & 波动率 \textperiodcentered{} 特质波动率 \textperiodcentered{} 日内振幅 \\
+\textbf{估值 / 盈利簇} & 盈利收益率 \textperiodcentered{} 净利润市值比 \textperiodcentered{} ROE \\
+\textbf{质量簇} & ROE \textperiodcentered{} 净利率 \\
+\textbf{流动性簇} & 波动率 \textperiodcentered{} 换手率 \\
+\bottomrule
+\end{longtable}
+}
+\subsubsection{\texorpdfstring{3.3 降维会不会丢信息？先看"组合到底有没有用"}{3.3 降维会不会丢信息？先看"组合到底有没有用"}}
+用\textbf{上帝视角}（全样本最优方向）把因子等权合成，看综合打分的 ICIR：
+{\small
+\begin{longtable}{p{9.40cm}p{3.89cm}p{2.92cm}}
+\toprule
+合成方案 & 用了几个因子 & ICIR \\
+\midrule
+只用最强的 1 个（特质波动率） & 1 & 0.760 \\
+\textbf{只用最强的 3 个} & 3 & \textbf{0.885} \\
+24 个全上、等权 & 24 & 0.652 \\
+\bottomrule
+\end{longtable}
+}
+\textbf{读法}：
+\begin{itemize}
+  \item 把最强的 3 个组合起来，ICIR 从 0.760 提到 \textbf{0.885（+16\%）} \ensuremath{\Longrightarrow} \textbf{"组合"这件事本身有价值，方向没错}
+  \item \textbf{但 24 个全等权反而掉到 0.652} \ensuremath{\Longrightarrow} 尾部那些弱因子在\textbf{稀释}强因子
+\end{itemize}
+\textbf{注意口径}：这里用的是\textbf{等权}，不是方案里第 2 步的"按相关结构加权"。所以结论不是"组合没用"，而是"\textbf{粗放地等权不行}"。第 2/3 步要做的事，就是把这个 0.652 拉回 0.885 以上。
+\subsection{\texorpdfstring{四、中途的意外收获：一个数据口径 bug}{四、中途的意外收获：一个数据口径 bug}}
+诊断过程中发现：\textbf{旧的价值因子（市净率倒数、盈利收益率）分母用错了} ------ 写成了"每股净资产 \ensuremath{\div} 流通市值"，而正确写法是"每股净资产 \ensuremath{\div} \textbf{股价}"，\textbf{量纲差了一个股本因子}。
+改正之后（同一套流程，只换分母）：
+{\small
+\begin{longtable}{p{4.05cm}p{7.29cm}p{4.86cm}}
+\toprule
+因子 & 改之前 & 改之后 \\
+\midrule
+市净率倒数 & t = 1.78（不显著） & \textbf{t = 8.14} \\
+盈利收益率 & t = 1.23（不显著） & \textbf{t = 5.33} \\
+\bottomrule
+\end{longtable}
+}
+\textbf{价值因子的信号一直都在，是被量纲错误压没了。}
+\subsection{\texorpdfstring{五、这一轮还做了什么：因子池 12 \ensuremath{\rightarrow} 24}{五、这一轮还做了什么：因子池 12 → 24}}
+原来池子只有 12 个因子，做降维太薄（有效维度才 3.2）。按业界通用做法 🔴 补到 24 个：
+\begin{itemize}
+  \item \textbf{量价类 9 个}：短期反转、特质波动率、beta、收益偏度、最大单日收益、非流动性、换手率变化、日内振幅、量价相关
+  \item \textbf{财务类 3 个}：营收/市值、净利润/市值、每股净资产同比
+\end{itemize}
+结果：有统计显著性的因子从 \textbf{5/12 升到 17/24}。强的集中在\textbf{量价类}（低风险 / 反彩票效应）和\textbf{估值类}；\textbf{质量类（ROE、毛利率、净利率）全部不显著}。
+\begin{quote}
+另记录一个小问题：年报与一季报的"可用日"会撞在同一天，导致约 \textbf{0.13\%} 的样本可能取错报表，待修。
+\end{quote}
+\subsection{\texorpdfstring{六、下一步怎么优化}{六、下一步怎么优化}}
+{\small
+\begin{longtable}{p{1.28cm}p{9.29cm}p{5.63cm}}
+\toprule
+步骤 & 做什么 & 验收线 \\
+\midrule
+\textbf{Step 2} & \textbf{聚类定块数}：按\textbf{暴露相关}做层次聚类，沿树扫块数、用 BIC 定，再加一次确证性 F 检验 🟢 & 分出的块\textbf{能用经济含义讲清}，且\textbf{跨前后两段样本稳定} \\
+\textbf{Step 3} & \textbf{定块权重}：按"谁有效 + 谁和谁不重复"分配（GLS），再叠一层收缩压住极端权重 & \textbf{冻结样本外的 ICIR 必须 > 0.885}（top3 等权基准） \\
+\textbf{Step 4} & \textbf{显著性检验}：IC 序列加 HAC 稳健 t 值 🟢 + 联合检验 🟢 & 综合打分在多重检验校正后仍显著 \\
+\textbf{Step 5} & \textbf{诚实标注局限}：多重检验本模块不处理，写进文档 🔴 & --- \\
+\bottomrule
+\end{longtable}
+}
+\textbf{三条贯穿全程的硬规矩}（沿用上一轮教训）：
+\begin{enumerate}
+  \item \textbf{所有估计只用训练窗口}，绝不碰冻结样本外
+  \item \textbf{不做"试到通过"的搜索}
+  \item \textbf{每个方法都要说清它能给什么、不能给什么}
+\end{enumerate}
+\textbf{待拍板的一件事}：聚类基准从「预测力相关」改为「暴露相关」，是否同意。
+\subsection{\texorpdfstring{附录 A \textperiodcentered{} 标注汇总}{附录 A · 标注汇总}}
+{\small
+\begin{longtable}{p{9.68cm}p{6.52cm}}
+\toprule
+内容 & 标注 \\
+\midrule
+F 检验 / 嵌套约束检验 & 🟢 课内（ETX5460 W9 + Project2 Q3） \\
+HAC / Newey-West 稳健标准误 & 🟢 课内（ETX5460 W9） \\
+层次聚类 / BIC 扫块数 & 🔴 发散（机器学习 + 信息准则） \\
+因子构造（波动率 / 反转 / 偏度 / MAX / 非流动性 ...） & 🔴 发散（业界通用做法） \\
+安慰剂 / 非重叠子样本 / 有效因子数 & 🔴 发散（诊断方法） \\
+多重检验校正 & 🔴 发散 \\
+\bottomrule
+\end{longtable}
+}
+\subsection{\texorpdfstring{附录 B \textperiodcentered{} 本轮交付物}{附录 B · 本轮交付物}}
+{\small
+\begin{longtable}{p{3.24cm}p{12.96cm}}
+\toprule
+类型 & 文件 \\
+\midrule
+诊断脚本 & \texttt{\_diag\_dim.R}（因子降维可行性诊断） \\
+扩池脚本 & \texttt{\_factor\_ext2.R}（12 \ensuremath{\rightarrow} 24 因子） \\
+字段语义探查 & \texttt{\_probe\_units.R}（价格 / 市值 / 换手的口径校验） \\
+数据产物 & \texttt{\_factor\_panel2.parquet}（24 因子面板，1.84 GB） \\
+运行日志 & \texttt{\_diag\_dim\_panel2.log}、\texttt{\_factor\_ext2.log} \\
+\bottomrule
+\end{longtable}
+}
+\begin{quote}
+文档信息：\texttt{Desktop\textbackslash{}就业\textbackslash{}东方证券alpha优化\textbackslash{}因子降维\_阶段汇报.md} ｜生成 2026-10-10 ｜源 \texttt{.md} / \texttt{.tex} 同目录，\textbf{PDF 为交付物}
+\end{quote}
+\end{document}

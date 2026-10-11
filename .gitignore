@@ -1,0 +1,28 @@
+# ---- 数据（体积大，不入库）----
+*.parquet
+*.csv
+data/
+chunks/
+
+# ---- R ----
+.Rhistory
+.RData
+.Rproj.user/
+
+# ---- LaTeX 中间文件（但保留 "_" 开头的 R 运行日志）----
+*.aux
+*.toc
+*.out
+*.synctex.gz
+*.log
+!_*.log
+
+# ---- Python ----
+__pycache__/
+*.pyc
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
